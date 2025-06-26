@@ -1,5 +1,9 @@
 settings:
   wp_path: /path/to/your/local/wordpress
+  db_host: localhost
+  db_user: wp_user
+  db_pass: wp_pass
+  db_name: wp_database
   apply_taxonomy:
     mode: all  # Options: all, children_only, bottom_only
   backup:
@@ -7,9 +11,8 @@ settings:
     output_path: ./backups/media-categorizer-$(date +%F_%H-%M-%S).sql
   output_csv_path: ./logs/media-categorizer-log-$(date +%F_%H-%M-%S).csv
 
-# Performance: The script uses Python preprocessing by default for 30-45x speedup
-# Requires: pip install pyyaml
-# Use --no-preprocess flag to fall back to legacy Bash matching if needed
+# Pure Python implementation for fast, reliable taxonomy assignment
+# Requires: pip install pyyaml pymysql
 
 mappings:
   Formals:

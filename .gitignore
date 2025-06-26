@@ -2,7 +2,7 @@
 backups/
 *.sql
 
-# Config overrides (optional)
+# Config files (keep sample, ignore actual config)
 config.local.yml
 config.yml
 

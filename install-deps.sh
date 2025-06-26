@@ -84,10 +84,10 @@ setup_venv() {
     log_info "Activating virtual environment..."
     source venv/bin/activate
     
-    # Install PyYAML
-    log_info "Installing PyYAML in virtual environment..."
-    if ! pip install pyyaml; then
-        log_error "Failed to install PyYAML in virtual environment"
+    # Install Python dependencies
+    log_info "Installing Python dependencies in virtual environment..."
+    if ! pip install pyyaml pymysql; then
+        log_error "Failed to install Python dependencies in virtual environment"
         echo
         echo "This might be due to:"
         echo "  - Network connectivity issues"
@@ -96,20 +96,20 @@ setup_venv() {
         exit 1
     fi
     
-    log_success "PyYAML installed successfully in virtual environment"
+    log_success "Python dependencies (PyYAML, pymysql) installed successfully in virtual environment"
     return 0
 }
 
-# Install PyYAML globally
-install_global_pyyaml() {
-    log_info "Installing PyYAML globally..."
+# Install Python dependencies globally
+install_global_dependencies() {
+    log_info "Installing Python dependencies globally..."
     log_warning "Installing globally - this may affect system Python packages"
     
-    if ! python3 -m pip install pyyaml; then
-        log_error "Failed to install PyYAML globally"
+    if ! python3 -m pip install pyyaml pymysql; then
+        log_error "Failed to install Python dependencies globally"
         echo
         echo "This might be due to:"
-        echo "  - Permission issues (try: python3 -m pip install --user pyyaml)"
+        echo "  - Permission issues (try: python3 -m pip install --user pyyaml pymysql)"
         echo "  - Missing pip (install with: python3 -m ensurepip --upgrade)"
         echo "  - System package management restrictions"
         echo
@@ -117,7 +117,7 @@ install_global_pyyaml() {
         exit 1
     fi
     
-    log_success "PyYAML installed globally"
+    log_success "Python dependencies (PyYAML, pymysql) installed globally"
 }
 
 # Check for optional dependencies
@@ -179,10 +179,12 @@ show_instructions() {
         echo "1. Run the script:"
     fi
     
-    echo "   ${BLUE}./categorize-media.sh --limit=5 --verbose${NC}"
+    echo "   ${BLUE}python preprocess_media.py --limit=5 --verbose${NC}"
+    echo "   ${BLUE}python apply_terms_direct.py --dry-run --verbose${NC}"
     echo
     echo "3. For production use:"
-    echo "   ${BLUE}./categorize-media.sh --apply${NC}"
+    echo "   ${BLUE}python preprocess_media.py${NC}"
+    echo "   ${BLUE}python apply_terms_direct.py${NC}"
     echo
     
     echo -e "${BOLD}Dependencies status:${NC}"
@@ -222,7 +224,7 @@ main() {
     else
         echo
         log_info "Skipping virtual environment setup"
-        install_global_pyyaml
+        install_global_dependencies
     fi
     
     # Check optional dependencies

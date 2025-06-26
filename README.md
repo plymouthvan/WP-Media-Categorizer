@@ -1,6 +1,6 @@
 # Media Categorizer
 
-A utility script for programmatically assigning custom taxonomy terms to WordPress media library items (attachments), based on filename keyword matches.
+A Python utility for programmatically assigning custom taxonomy terms to WordPress media library items (attachments), based on filename keyword matches.
 
 This tool is designed for use in local or staging environments where automated taxonomy tagging can save time and enforce consistency.
 
@@ -21,8 +21,9 @@ cd WP-Media-Categorizer
 # Then activate virtual environment if you chose to create one:
 source venv/bin/activate
 
-# Test the script
-./categorize-media.sh --limit=5 --verbose
+# Test the workflow
+python preprocess_media.py --limit=5 --verbose
+python apply_terms_direct.py --dry-run --verbose
 ```
 
 ### Manual Setup
@@ -30,24 +31,21 @@ If you prefer to install dependencies manually:
 
 ```bash
 # Install Python dependencies
-pip install pyyaml
+pip install pyyaml pymysql
 
-# Install system dependencies (macOS)
-brew install jq yq
-
-# Install system dependencies (Ubuntu/Debian)
-sudo apt-get install jq yq
+# Or with virtual environment
+python3 -m venv venv
+source venv/bin/activate
+pip install pyyaml pymysql
 ```
 
 ## 🔧 Requirements
 
+- **Python 3.8+** with PyYAML and pymysql packages
 - WordPress CLI (`wp`) must be installed and available in your shell
-- `yq` must be installed (for parsing YAML)
-- `jq` must be installed (for JSON parsing when using Python preprocessor)
-- **Python 3.8+** and PyYAML (for fast preprocessing)
 - The WordPress installation must be accessible and functioning
 - A custom taxonomy named `media_category` must already be registered
-- Bash 3.2+ is required. On macOS, the default bash version is sufficient.
+- MySQL database access credentials for your WordPress installation
 
 **Note:** Use `./install-deps.sh` for automated dependency setup with virtual environment support.
 
@@ -57,10 +55,10 @@ sudo apt-get install jq yq
 
 ```
 media-categorizer/
-├── categorize-media.sh      # Main script
-├── preprocess_media.py      # Python preprocessor for fast matching
+├── preprocess_media.py      # Phase 1: Fetch attachments and find matches
+├── apply_terms_direct.py    # Phase 2: Apply taxonomy terms via direct DB access
 ├── install-deps.sh          # Dependency setup script
-├── config.yml               # Keyword mapping & settings
+├── config.yml               # Keyword mapping, DB credentials & settings
 └── README.md                # This file
 ```
 
@@ -68,29 +66,34 @@ media-categorizer/
 
 ## 🧠 How it Works
 
-The script:
+The tool uses a **two-phase Python-only architecture**:
 
-1. Parses `config.yml` to read:
-   - Your WordPress install location
-   - Keyword-to-taxonomy mappings (e.g., filenames containing "Formals" → "Wedding > Portraits")
-   - Taxonomy assignment mode (all terms, only children, or just bottom-most)
-   - Backup settings
-2. Runs a **dry run** by default:
-   - Lists which attachments will be affected
-   - Shows the matched keywords and target taxonomy terms
-   - Warns about any missing terms
-3. Prompts to create missing terms, with correct parent-child structure
-4. If run with `--apply`, actually applies changes and creates backup if enabled
+### Phase 1: Preprocessing (`preprocess_media.py`)
+1. Connects to WordPress via wp-cli to fetch all media attachments
+2. Processes filename keyword matches based on your `config.yml` mappings
+3. Outputs results to `tmp/matches.json` in a standardized format
+
+### Phase 2: Application (`apply_terms_direct.py`)
+1. Reads the matches from `tmp/matches.json`
+2. Connects directly to the MySQL database using your credentials
+3. Creates missing taxonomy terms with proper hierarchical structure
+4. Assigns terms to attachments via direct database writes
+5. Updates term counts and flushes WordPress cache
+6. Generates detailed CSV logs of all operations
+
+**Default behavior:** Runs in dry-run mode to show what would happen before making changes.
 
 ---
 
 ## 📝 config.yml Format
 
-The top-level keys under `mappings` are only labels for organizational purposes. They do not affect the logic. You can name them anything you like — they are not used for matching.
-
 ```yaml
 settings:
   wp_path: /path/to/wordpress
+  db_host: localhost
+  db_user: wp_user
+  db_pass: wp_pass
+  db_name: wp_database
   apply_taxonomy:
     mode: all  # Options: all, children_only, bottom_only
   backup:
@@ -118,84 +121,101 @@ mappings:
       - Wedding > Details
 ```
 
+### Database Configuration
+You must provide MySQL credentials for your WordPress database:
+- `db_host`: Database server hostname (usually `localhost`)
+- `db_user`: Database username
+- `db_pass`: Database password  
+- `db_name`: WordPress database name
+
 ---
 
 ## 🚀 Usage
 
-### Dry run (default):
+### Two-Phase Workflow
 
+#### Phase 1: Preprocessing
 ```bash
-./categorize-media.sh
+# Generate matches (dry run with limited results)
+python preprocess_media.py --limit=5 --verbose
+
+# Generate all matches
+python preprocess_media.py
 ```
 
-### Apply changes:
-
+#### Phase 2: Application
 ```bash
-./categorize-media.sh --apply
+# Dry run (show what would be applied)
+python apply_terms_direct.py --dry-run
+
+# Apply changes to database
+python apply_terms_direct.py
+
+# Apply with backup
+python apply_terms_direct.py --backup
 ```
 
-### Optional Flags:
+### Command Line Options
 
-- `--apply` - Actually assign taxonomy terms and create missing terms if confirmed
-- `--no-prompt` - Suppress interactive prompts (auto-create missing terms if needed)
-- `--limit=N` - Process only the first N matching attachments (useful for testing)
-- `--export` - Skip all changes and output results as CSV only (dry-run + log)
-- `--preprocess` - Use Python preprocessor for fast matching (default: true)
-- `--no-preprocess` - Use legacy Bash matching (slower but no Python required)
-- `--keep-temp` - Keep temporary matches.json file for debugging
-- `--verbose` - Display detailed processing output for debugging and review
-- `--no-color` - Disable colored terminal output
-- `-h, --help` - Show usage information
+#### preprocess_media.py
+- `--config=FILE` - Path to configuration file (default: config.yml)
+- `--limit=N` - Process only the first N attachments (useful for testing)
+- `--verbose` - Display detailed processing output
 
-### Examples:
+#### apply_terms_direct.py
+- `--dry-run` - Show what would be done, no database writes
+- `--export` - Generate CSV log only, no changes
+- `--backup` - Run `wp db export` before modifying database
+- `--verbose` - Enable verbose output
+- `--config=FILE` - Path to configuration file (default: config.yml)
+
+### Examples
 
 ```bash
-# Dry run with verbose output
-./categorize-media.sh --verbose
+# Complete workflow with testing
+python preprocess_media.py --limit=10 --verbose
+python apply_terms_direct.py --dry-run --verbose
 
-# Apply changes with prompts
-./categorize-media.sh --apply
-
-# Apply changes without prompts
-./categorize-media.sh --apply --no-prompt
+# Production workflow with backup
+python preprocess_media.py
+python apply_terms_direct.py --backup
 
 # Generate CSV report only
-./categorize-media.sh --export
-
-# Process first 10 attachments with details
-./categorize-media.sh --limit=10 --verbose
+python preprocess_media.py
+python apply_terms_direct.py --export
 ```
 
 ---
 
-## ⚡ Performance Optimization
+## ⚡ Performance & Architecture
 
-The script now includes a **two-phase architecture** for dramatically improved performance:
+### Pure Python Implementation
+- **Fast processing**: Direct database access eliminates wp-cli overhead for term operations
+- **Batch operations**: Efficient bulk inserts for relationships and term creation
+- **Transaction safety**: All database changes are wrapped in transactions with rollback support
+- **Caching**: Existing terms and relationships are cached for optimal performance
 
-### Python Preprocessor (Default)
-- **Fast matching**: Uses Python's compiled regex and efficient string operations
-- **Single wp-cli call**: Fetches all attachments at once instead of multiple queries
-- **Massive speedup**: ~30-45x faster for large media libraries (18k files: ~1.5h → ~2-3min)
-- **Automatic**: Enabled by default with `--preprocess` (or `--preprocess=true`)
-
-### Legacy Bash Mode
-- **Fallback option**: Use `--no-preprocess` if Python is unavailable
-- **Same results**: Identical matching logic and output
-- **Slower**: Line-by-line processing in Bash (original performance)
-
-### Requirements for Fast Mode
-```bash
-# Install Python dependencies
-pip install pyyaml
-
-# Ensure jq is available for JSON parsing
-brew install jq  # macOS
-# or apt-get install jq  # Ubuntu/Debian
-```
+### Database Operations
+- **Direct MySQL access**: Uses pymysql for efficient database operations
+- **Hierarchical terms**: Properly handles parent-child term relationships
+- **Relationship management**: Batch inserts new term assignments, skips existing ones
+- **Count updates**: Automatically maintains accurate term usage counts
+- **Cache invalidation**: Flushes WordPress cache after database changes
 
 ---
 
 ## 🔧 Troubleshooting
+
+### Database Connection Issues
+If you get database connection errors:
+
+```bash
+# Test your database credentials
+mysql -h localhost -u wp_user -p wp_database
+
+# Check your config.yml database settings
+# Ensure the database user has proper permissions
+```
 
 ### Virtual Environment Issues
 If you encounter issues with the virtual environment:
@@ -205,7 +225,7 @@ If you encounter issues with the virtual environment:
 sudo apt-get install python3-venv
 
 # Or use the --user flag for global installation
-python3 -m pip install --user pyyaml
+python3 -m pip install --user pyyaml pymysql
 
 # Check Python version (requires 3.8+)
 python3 --version
@@ -216,29 +236,14 @@ If you get permission errors:
 
 ```bash
 # For global installation, try user installation
-python3 -m pip install --user pyyaml
+python3 -m pip install --user pyyaml pymysql
 
 # Or use virtual environment (recommended)
 ./install-deps.sh
 ```
 
-### Missing Dependencies
-If jq or yq are missing:
-
-```bash
-# macOS
-brew install jq yq
-
-# Ubuntu/Debian
-sudo apt-get install jq
-
-# For yq on Ubuntu/Debian
-sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-sudo chmod +x /usr/local/bin/yq
-```
-
 ### WordPress Connection Issues
-If the script can't connect to WordPress:
+If the preprocessor can't connect to WordPress:
 
 - Ensure `wp-cli` is installed and working: `wp --info`
 - Check that the `wp_path` in `config.yml` is correct
@@ -248,22 +253,31 @@ If the script can't connect to WordPress:
 
 ## 🧪 Notes
 
-- Filenames are matched case-insensitively against keywords
-- The script only scans media items (post_type=attachment)
-- Files can match multiple keywords, and all applicable taxonomy terms will be assigned
-- Terms are created if missing, unless declined during prompt
-- Hierarchical terms are respected and created in order if necessary
-- Term existence checks are cached for performance — the script avoids duplicate `wp term list` calls
-- When `--apply` is used, the script generates a simple CSV log of changes (attachments updated and terms created)
-- If multiple keywords match the same taxonomy term, that term is only assigned once per attachment
-- Terminal color output is enabled by default for readability. Use `--no-color` to disable it
-- Regex-based matching is supported. Use `regex: true` under a mapping entry to match filenames with regular expressions
-- The `--export` flag behaves like a dry run, but outputs results to CSV without applying any changes or prompting
-- Use `--verbose` to print extra details during processing, including matched keywords, term assignments, and creation events
-- You can customize the location of the CSV output log with `settings.output_csv_path` in your config file
+- **Filename matching**: Case-insensitive matching against keywords
+- **Multiple matches**: Files can match multiple keywords, all applicable terms are assigned
+- **Hierarchical terms**: Terms are created with proper parent-child relationships
+- **Duplicate prevention**: Existing term relationships are preserved, no duplicates created
+- **Transaction safety**: All database operations use transactions with rollback on error
+- **CSV logging**: Detailed logs of all operations for audit and troubleshooting
+- **Regex support**: Use `regex: true` in mappings for pattern-based matching
+- **Taxonomy modes**: 
+  - `all`: Assign all terms in hierarchy (e.g., both "Wedding" and "Portraits")
+  - `children_only`: Assign only parent terms that have children
+  - `bottom_only`: Assign only the deepest terms in each hierarchy
+
+---
+
+## 🔄 Migration from Bash Version
+
+If you're upgrading from the previous Bash+Python hybrid:
+
+1. **Database credentials**: Add `db_host`, `db_user`, `db_pass`, `db_name` to your `config.yml`
+2. **New workflow**: Replace `./categorize-media.sh --apply` with the two-phase Python workflow
+3. **Same functionality**: All features (dry-run, backup, CSV logging, taxonomy modes) work identically
+4. **Performance improvement**: Expect significantly faster execution due to direct database access
 
 ---
 
 ## 💥 Disclaimer
 
-This script is provided for use in development and staging environments. Do not run this in production without understanding the consequences. Back up your database before making changes.
+This script is provided for use in development and staging environments. Always backup your database before making changes. The tool includes built-in backup functionality, but you should also maintain your own backup strategy.
