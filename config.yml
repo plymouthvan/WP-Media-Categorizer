@@ -11,24 +11,24 @@ mappings:
   Formals:
     match: "Formals"
     terms:
-      - Wedding > Portraits
+      - wedding > portraits
   Candids:
     match: "Candids"
     terms:
-      - Wedding > Preparations
+      - wedding > preparations
   Ceremony:
     match: "Ceremony"
     terms:
-      - Wedding > Ceremony
+      - wedding > ceremony
   Details:
     match: "Details"
     terms:
-      - Wedding > Details
+      - wedding > details
   Party:
     match: "Party"
     terms:
-      - Wedding > Party
+      - wedding > party
   Portfolio:
     match: "Portfolio"
     terms:
-      - Wedding > Portfolio
+      - wedding > portfolio

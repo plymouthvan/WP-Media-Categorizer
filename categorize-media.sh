@@ -493,13 +493,13 @@ cache_taxonomy_terms() {
     log_verbose "Caching existing taxonomy terms..."
     
     local term_data
-    if ! term_data=$(cd "$CONFIG_WP_PATH" && wp term list "$TAXONOMY_NAME" --format=csv --fields=term_id,name,parent 2>/dev/null); then
+    if ! term_data=$(cd "$CONFIG_WP_PATH" && wp term list "$TAXONOMY_NAME" --format=csv --fields=term_id,name,slug 2>/dev/null); then
         log_error "Failed to fetch taxonomy terms"
         return 1
     fi
     
     local count=0
-    while IFS=',' read -r term_id name parent; do
+    while IFS=',' read -r term_id name slug; do
         # Skip header row
         if [[ "$term_id" == "term_id" ]]; then
             continue
@@ -508,9 +508,16 @@ cache_taxonomy_terms() {
         # Remove quotes
         term_id=${term_id//\"/}
         name=${name//\"/}
-        parent=${parent//\"/}
+        slug=${slug//\"/}
         
+        # Cache by both name and slug (case-insensitive)
         add_term_to_cache "$name" "$term_id"
+        add_term_to_cache "$slug" "$term_id"
+        # Also cache lowercase versions for case-insensitive lookup
+        local lower_name=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+        local lower_slug=$(echo "$slug" | tr '[:upper:]' '[:lower:]')
+        add_term_to_cache "$lower_name" "$term_id"
+        add_term_to_cache "$lower_slug" "$term_id"
         ((count++))
     done <<< "$term_data"
     
@@ -900,29 +907,38 @@ analyze_required_terms() {
     log_info "Analyzing required taxonomy terms..."
     
     # Extract all unique term paths from TEMP_TERMS_FILE
-    local -a all_terms=()
-    local -a missing_terms=()
+    local all_terms
+    local missing_terms
+    all_terms=()
+    missing_terms=()
     
     # Get unique terms (Bash 3.2 compatible)
     while IFS=',' read -r attachment_id term_path; do
         # Check if we've already seen this term
         local found=false
-        for existing_term in "${all_terms[@]}"; do
-            if [[ "$existing_term" == "$term_path" ]]; then
-                found=true
-                break
-            fi
-        done
+        if [[ ${#all_terms[@]} -gt 0 ]]; then
+            for existing_term in "${all_terms[@]}"; do
+                if [[ "$existing_term" == "$term_path" ]]; then
+                    found=true
+                    break
+                fi
+            done
+        fi
         
         if [[ "$found" == "false" ]]; then
             all_terms+=("$term_path")
         fi
     done < "$TEMP_TERMS_FILE"
     
-    log_verbose "Found ${#all_terms[@]} unique term paths"
+    if [[ ${#all_terms[@]} -gt 0 ]]; then
+        log_verbose "Found ${#all_terms[@]} unique term paths"
+    else
+        log_verbose "Found 0 unique term paths"
+    fi
     
-    # Check which terms don't exist
-    for term_path in "${all_terms[@]}"; do
+    # Check which terms don't exist (only if we have terms)
+    if [[ ${#all_terms[@]} -gt 0 ]]; then
+        for term_path in "${all_terms[@]}"; do
         # Parse hierarchical term to check each level
         IFS=' > ' read -ra TERM_PARTS <<< "$term_path"
         
@@ -942,7 +958,8 @@ analyze_required_terms() {
                 fi
             fi
         done
-    done
+        done
+    fi
     
     if [[ ${#missing_terms[@]} -eq 0 ]]; then
         log_success "All required terms already exist"
@@ -986,27 +1003,51 @@ analyze_required_terms() {
 
 filter_terms_by_mode() {
     local attachment_id="$1"
-    local -a all_terms=()
+    local -a all_term_paths=()
     local -a filtered_terms=()
     
-    # Load all terms for this attachment
+    # Load all term paths for this attachment
     while IFS=',' read -r term_attachment_id term_path; do
         if [[ "$term_attachment_id" == "$attachment_id" ]]; then
-            all_terms+=("$term_path")
+            all_term_paths+=("$term_path")
         fi
     done < "$TEMP_TERMS_FILE"
     
     case "$CONFIG_TAXONOMY_MODE" in
         "all")
-            # Return all terms - simple case
-            filtered_terms=("${all_terms[@]}")
+            # Expand hierarchical paths into individual terms
+            # For "wedding > portraits", assign both "wedding" and "portraits"
+            local -a all_individual_terms=()
+            for term_path in "${all_term_paths[@]}"; do
+                # Parse hierarchical term path
+                IFS=' > ' read -ra TERM_PARTS <<< "$term_path"
+                for term_name in "${TERM_PARTS[@]}"; do
+                    # Check if we've already added this individual term
+                    local already_added=false
+                    if [[ ${#all_individual_terms[@]} -gt 0 ]]; then
+                        for existing_term in "${all_individual_terms[@]}"; do
+                            if [[ "$existing_term" == "$term_name" ]]; then
+                                already_added=true
+                                break
+                            fi
+                        done
+                    fi
+                    
+                    if [[ "$already_added" == "false" ]]; then
+                        all_individual_terms+=("$term_name")
+                    fi
+                done
+            done
+            if [[ ${#all_individual_terms[@]} -gt 0 ]]; then
+                filtered_terms=("${all_individual_terms[@]}")
+            fi
             ;;
         "children_only")
             # Return only terms that have children (not leaf terms)
-            for term_path in "${all_terms[@]}"; do
+            for term_path in "${all_term_paths[@]}"; do
                 # Check if this term path has a child in the list
                 local has_child=false
-                for other_term in "${all_terms[@]}"; do
+                for other_term in "${all_term_paths[@]}"; do
                     if [[ "$other_term" != "$term_path" && "$other_term" == "$term_path > "* ]]; then
                         has_child=true
                         break
@@ -1014,16 +1055,18 @@ filter_terms_by_mode() {
                 done
                 
                 if [[ "$has_child" == "true" ]]; then
-                    filtered_terms+=("$term_path")
+                    # Extract only the bottom-most term from paths that have children
+                    local bottom_term="${term_path##* > }"
+                    filtered_terms+=("$bottom_term")
                 fi
             done
             ;;
         "bottom_only")
             # Return only leaf terms (deepest in hierarchy)
-            for term_path in "${all_terms[@]}"; do
+            for term_path in "${all_term_paths[@]}"; do
                 # Check if this term is a leaf (no other term starts with this + " > ")
                 local is_leaf=true
-                for other_term in "${all_terms[@]}"; do
+                for other_term in "${all_term_paths[@]}"; do
                     if [[ "$other_term" != "$term_path" && "$other_term" == "$term_path > "* ]]; then
                         is_leaf=false
                         break
@@ -1031,7 +1074,9 @@ filter_terms_by_mode() {
                 done
                 
                 if [[ "$is_leaf" == "true" ]]; then
-                    filtered_terms+=("$term_path")
+                    # Extract only the bottom-most term from leaf paths
+                    local bottom_term="${term_path##* > }"
+                    filtered_terms+=("$bottom_term")
                 fi
             done
             ;;
@@ -1043,22 +1088,27 @@ filter_terms_by_mode() {
 
 assign_term_to_attachment() {
     local attachment_id="$1"
-    local term_path="$2"
+    local term_name="$2"
     
-    # Get the bottom-most term name from the path
-    local term_name="${term_path##* > }"
-    
-    # Find the term ID
+    # Try to find the term ID by name first, then by lowercase version
     local term_id
-    if ! term_id=$(find_term_id "$term_name"); then
-        log_error "Term not found: $term_name"
+    local lower_term_name=$(echo "$term_name" | tr '[:upper:]' '[:lower:]')
+    
+    if term_id=$(find_term_id "$term_name"); then
+        # Found by exact name
+        log_verbose "Found term '$term_name' by name (ID: $term_id)"
+    elif term_id=$(find_term_id "$lower_term_name"); then
+        # Found by lowercase name/slug
+        log_verbose "Found term '$term_name' by slug '$lower_term_name' (ID: $term_id)"
+    else
+        log_error "Term not found: $term_name (also tried: $lower_term_name)"
         return 1
     fi
     
     log_verbose "Assigning term '$term_name' (ID: $term_id) to attachment $attachment_id"
     
-    # Use wp-cli to assign the term
-    if (cd "$CONFIG_WP_PATH" && wp post term add "$attachment_id" "$TAXONOMY_NAME" "$term_id" 2>/dev/null); then
+    # Use wp-cli to assign the term by slug (more reliable than ID)
+    if (cd "$CONFIG_WP_PATH" && wp post term add "$attachment_id" "$TAXONOMY_NAME" "$lower_term_name" 2>/dev/null); then
         log_verbose "Successfully assigned term '$term_name' to attachment $attachment_id"
         return 0
     else
