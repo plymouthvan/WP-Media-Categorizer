@@ -215,7 +215,7 @@ def main():
     # Process matches
     matches = process_matches(attachments, config["mappings"], args.verbose)
     
-    # Write results
+    # Write results (always write file, even if empty)
     write_matches_json(matches)
     
     # Print summary

@@ -396,8 +396,10 @@ load_matches_from_json() {
         return 0
     fi
     
-    # Load attachment IDs
-    mapfile -t MEDIA_IDS < <(jq -r 'keys[]' "$matches_file")
+    # Load attachment IDs (Bash 3.2 compatible)
+    while IFS= read -r id; do
+        MEDIA_IDS+=("$id")
+    done < <(jq -r 'keys[]' "$matches_file")
     
     # Load corresponding data for each ID
     local i=0
@@ -413,8 +415,11 @@ load_matches_from_json() {
     
     # Populate temp files from JSON data
     for id in "${MEDIA_IDS[@]}"; do
-        # Get terms for this attachment
-        mapfile -t terms < <(jq -r --arg id "$id" '.[$id].terms[]' "$matches_file")
+        # Get terms for this attachment (Bash 3.2 compatible)
+        local terms=()
+        while IFS= read -r term; do
+            terms+=("$term")
+        done < <(jq -r --arg id "$id" '.[$id].terms[]' "$matches_file")
         
         # Create a dummy mapping key for each term (for display compatibility)
         for term in "${terms[@]}"; do
