@@ -1,10 +1,10 @@
 settings:
-  wp_path: /path/to/your/local/wordpress
+  wp_path: /Users/williampetruzzo/Sites/Petruzzo-Staging-Rebuild
   apply_taxonomy:
     mode: all  # Options: all, children_only, bottom_only
   backup:
     enabled: true
-    output_path: ./backups/media-categorizer-$(date +%F_%H-%M-%S).sql
+    output_path: /Users/williampetruzzo/Sites/backups_staging_rebuild/media-categorizer-$(date +%F_%H-%M-%S).sql
   output_csv_path: ./logs/media-categorizer-log-$(date +%F_%H-%M-%S).csv
 
 mappings:
@@ -31,9 +31,4 @@ mappings:
   Portfolio:
     match: "Portfolio"
     terms:
-      - Portfolio
-  PatternExample:
-    match: "(?i)^wedding.*details"
-    regex: true
-    terms:
-      - Wedding > Details
+      - Wedding > Portfolio

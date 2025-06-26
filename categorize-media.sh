@@ -26,6 +26,8 @@ ARG_EXPORT=false
 ARG_NO_COLOR=false
 ARG_VERBOSE=false
 ARG_LIMIT=0
+ARG_PREPROCESS=true
+ARG_KEEP_TEMP=false
 
 # Configuration variables
 CONFIG_WP_PATH=""
@@ -101,6 +103,9 @@ OPTIONS:
     --no-prompt       Skip interactive prompts (auto-create missing terms)
     --limit=N         Process only the first N matching attachments
     --export          Generate CSV output only, no changes or prompts
+    --preprocess      Use Python preprocessor for fast matching (default: true)
+    --no-preprocess   Use legacy Bash matching (slower but no Python required)
+    --keep-temp       Keep temporary matches.json file for debugging
     --no-color        Disable colored output
     --verbose         Show detailed runtime information
     -h, --help        Show this help message
@@ -323,6 +328,99 @@ ensure_csv_directory() {
             return 1
         }
     fi
+}
+
+#==============================================================================
+# PYTHON PREPROCESSOR INTERFACE
+#==============================================================================
+
+run_python_preprocessor() {
+    log_info "Running Python preprocessor..."
+    
+    # Check if Python 3 is available
+    if ! command -v python3 &> /dev/null; then
+        log_error "Python 3 is required for preprocessing. Install Python 3.8+ or use --no-preprocess"
+        return 1
+    fi
+    
+    # Check if preprocess_media.py exists
+    if [[ ! -f "preprocess_media.py" ]]; then
+        log_error "preprocess_media.py not found. Ensure the Python preprocessor script is in the current directory"
+        return 1
+    fi
+    
+    # Build Python command
+    local python_args="--config $CONFIG_FILE"
+    if [[ $ARG_LIMIT -gt 0 ]]; then
+        python_args="$python_args --limit $ARG_LIMIT"
+    fi
+    if [[ "$ARG_VERBOSE" == "true" ]]; then
+        python_args="$python_args --verbose"
+    fi
+    
+    log_verbose "Executing: python3 preprocess_media.py $python_args"
+    
+    # Run Python preprocessor
+    if ! python3 preprocess_media.py $python_args; then
+        log_error "Python preprocessor failed"
+        return 1
+    fi
+    
+    log_success "Python preprocessing completed"
+}
+
+load_matches_from_json() {
+    local matches_file="tmp/matches.json"
+    
+    if [[ ! -f "$matches_file" ]]; then
+        log_error "Matches file not found: $matches_file"
+        log_error "Python preprocessor may have failed"
+        return 1
+    fi
+    
+    # Check if jq is available for JSON parsing
+    if ! command -v jq &> /dev/null; then
+        log_error "jq is required for JSON parsing. Install with: brew install jq"
+        return 1
+    fi
+    
+    log_verbose "Loading matches from: $matches_file"
+    
+    # Check if matches file is empty or contains empty object
+    local match_count=$(jq 'length' "$matches_file" 2>/dev/null || echo "0")
+    if [[ "$match_count" == "0" ]]; then
+        log_info "No matches found in preprocessor results"
+        return 0
+    fi
+    
+    # Load attachment IDs
+    mapfile -t MEDIA_IDS < <(jq -r 'keys[]' "$matches_file")
+    
+    # Load corresponding data for each ID
+    local i=0
+    for id in "${MEDIA_IDS[@]}"; do
+        MEDIA_FILENAMES[$i]=$(jq -r --arg id "$id" '.[$id].filename' "$matches_file")
+        MEDIA_TITLES[$i]=$(jq -r --arg id "$id" '.[$id].title' "$matches_file")
+        ((i++))
+    done
+    
+    # Create temporary files for compatibility with existing display functions
+    TEMP_MATCHES_FILE=$(mktemp)
+    TEMP_TERMS_FILE=$(mktemp)
+    
+    # Populate temp files from JSON data
+    for id in "${MEDIA_IDS[@]}"; do
+        # Get terms for this attachment
+        mapfile -t terms < <(jq -r --arg id "$id" '.[$id].terms[]' "$matches_file")
+        
+        # Create a dummy mapping key for each term (for display compatibility)
+        for term in "${terms[@]}"; do
+            echo "$id,preprocessed" >> "$TEMP_MATCHES_FILE"
+            echo "$id,$term" >> "$TEMP_TERMS_FILE"
+        done
+    done
+    
+    log_success "Loaded $match_count attachments with matches from JSON"
 }
 
 #==============================================================================
@@ -740,6 +838,26 @@ parse_arguments() {
                 fi
                 shift
                 ;;
+            --preprocess=*)
+                ARG_PREPROCESS="${1#*=}"
+                if [[ "$ARG_PREPROCESS" != "true" && "$ARG_PREPROCESS" != "false" ]]; then
+                    log_error "Invalid preprocess value: $ARG_PREPROCESS (must be true or false)"
+                    exit 1
+                fi
+                shift
+                ;;
+            --preprocess)
+                ARG_PREPROCESS=true
+                shift
+                ;;
+            --no-preprocess)
+                ARG_PREPROCESS=false
+                shift
+                ;;
+            --keep-temp)
+                ARG_KEEP_TEMP=true
+                shift
+                ;;
             -h|--help)
                 show_usage
                 exit 0
@@ -770,6 +888,15 @@ cleanup() {
     if [[ -n "${TEMP_TERMS_FILE:-}" && -f "$TEMP_TERMS_FILE" ]]; then
         rm -f "$TEMP_TERMS_FILE"
     fi
+    
+    # Clean up temporary matches.json unless --keep-temp is specified
+    if [[ "$ARG_KEEP_TEMP" != "true" && -f "tmp/matches.json" ]]; then
+        rm -f "tmp/matches.json"
+        # Remove tmp directory if empty
+        if [[ -d "tmp" ]] && [[ -z "$(ls -A tmp)" ]]; then
+            rmdir "tmp"
+        fi
+    fi
 }
 
 trap cleanup EXIT
@@ -794,11 +921,16 @@ main() {
     # Initialize caches
     cache_taxonomy_terms || exit 1
     
-    # Fetch media attachments
-    get_media_attachments || exit 1
-    
-    # Process keyword matching
-    process_keyword_matches
+    # Choose processing method based on --preprocess flag
+    if [[ "$ARG_PREPROCESS" == "true" ]]; then
+        # Use Python preprocessor for fast matching
+        run_python_preprocessor || exit 1
+        load_matches_from_json || exit 1
+    else
+        # Use legacy Bash matching
+        get_media_attachments || exit 1
+        process_keyword_matches
+    fi
     
     # Execute based on mode
     if [[ "$ARG_EXPORT" == "true" ]]; then

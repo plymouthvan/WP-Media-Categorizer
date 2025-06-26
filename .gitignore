@@ -4,6 +4,7 @@ backups/
 
 # Config overrides (optional)
 config.local.yml
+config.yml
 
 # System files
 .DS_Store
@@ -11,6 +12,9 @@ Thumbs.db
 
 # Log files
 *.log
+
+# Temporary files
+tmp/matches.json
 
 # Shell script artifacts
 *.swp
