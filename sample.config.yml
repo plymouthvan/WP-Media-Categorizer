@@ -1,6 +1,7 @@
 settings:
   wp_path: /path/to/your/local/wordpress
   db_host: localhost
+  db_port: 3306
   db_user: wp_user
   db_pass: wp_pass
   db_name: wp_database

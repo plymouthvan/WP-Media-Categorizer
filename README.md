@@ -124,6 +124,7 @@ mappings:
 ### Database Configuration
 You must provide MySQL credentials for your WordPress database:
 - `db_host`: Database server hostname (usually `localhost`)
+- `db_port`: Database port (optional, defaults to 3306)
 - `db_user`: Database username
 - `db_pass`: Database password  
 - `db_name`: WordPress database name

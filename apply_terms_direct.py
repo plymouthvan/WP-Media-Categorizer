@@ -93,17 +93,27 @@ class MediaCategorizer:
         """Connect to MySQL database using configuration credentials."""
         settings = self.config['settings']
         
+        # Build connection parameters
+        connection_params = {
+            'host': settings['db_host'],
+            'user': settings['db_user'],
+            'password': settings['db_pass'],
+            'database': settings['db_name'],
+            'charset': 'utf8mb4',
+            'cursorclass': pymysql.cursors.DictCursor,
+            'autocommit': False
+        }
+        
+        # Add port if specified
+        if settings.get('db_port'):
+            connection_params['port'] = int(settings['db_port'])
+            connection_string = f"{settings['db_name']}@{settings['db_host']}:{settings['db_port']}"
+        else:
+            connection_string = f"{settings['db_name']}@{settings['db_host']}"
+        
         try:
-            self.db_connection = pymysql.connect(
-                host=settings['db_host'],
-                user=settings['db_user'],
-                password=settings['db_pass'],
-                database=settings['db_name'],
-                charset='utf8mb4',
-                cursorclass=pymysql.cursors.DictCursor,
-                autocommit=False
-            )
-            self.log_verbose(f"Connected to database: {settings['db_name']}@{settings['db_host']}")
+            self.db_connection = pymysql.connect(**connection_params)
+            self.log_verbose(f"Connected to database: {connection_string}")
         except pymysql.Error as e:
             self.log_error(f"Database connection failed: {e}")
             sys.exit(1)
