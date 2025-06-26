@@ -12,9 +12,21 @@ Thumbs.db
 
 # Log files
 *.log
+logs/
 
 # Temporary files
-tmp/matches.json
+tmp/
+
+# Python virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
 
 # Shell script artifacts
 *.swp

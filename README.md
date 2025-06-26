@@ -6,15 +6,50 @@ This tool is designed for use in local or staging environments where automated t
 
 ---
 
+## 🚀 Quick Start
+
+### Automated Setup (Recommended)
+```bash
+# Clone or download the project
+git clone https://github.com/plymouthvan/WP-Media-Categorizer.git
+cd WP-Media-Categorizer
+
+# Run the setup script
+./install-deps.sh
+
+# Follow the prompts to set up dependencies
+# Then activate virtual environment if you chose to create one:
+source venv/bin/activate
+
+# Test the script
+./categorize-media.sh --limit=5 --verbose
+```
+
+### Manual Setup
+If you prefer to install dependencies manually:
+
+```bash
+# Install Python dependencies
+pip install pyyaml
+
+# Install system dependencies (macOS)
+brew install jq yq
+
+# Install system dependencies (Ubuntu/Debian)
+sudo apt-get install jq yq
+```
+
 ## 🔧 Requirements
 
 - WordPress CLI (`wp`) must be installed and available in your shell
 - `yq` must be installed (for parsing YAML)
 - `jq` must be installed (for JSON parsing when using Python preprocessor)
-- **Python 3.8+** and PyYAML (for fast preprocessing - install with `pip install pyyaml`)
+- **Python 3.8+** and PyYAML (for fast preprocessing)
 - The WordPress installation must be accessible and functioning
 - A custom taxonomy named `media_category` must already be registered
 - Bash 3.2+ is required. On macOS, the default bash version is sufficient.
+
+**Note:** Use `./install-deps.sh` for automated dependency setup with virtual environment support.
 
 ---
 
@@ -24,6 +59,7 @@ This tool is designed for use in local or staging environments where automated t
 media-categorizer/
 ├── categorize-media.sh      # Main script
 ├── preprocess_media.py      # Python preprocessor for fast matching
+├── install-deps.sh          # Dependency setup script
 ├── config.yml               # Keyword mapping & settings
 └── README.md                # This file
 ```
@@ -156,6 +192,57 @@ pip install pyyaml
 brew install jq  # macOS
 # or apt-get install jq  # Ubuntu/Debian
 ```
+
+---
+
+## 🔧 Troubleshooting
+
+### Virtual Environment Issues
+If you encounter issues with the virtual environment:
+
+```bash
+# Ensure python3-venv is installed (Ubuntu/Debian)
+sudo apt-get install python3-venv
+
+# Or use the --user flag for global installation
+python3 -m pip install --user pyyaml
+
+# Check Python version (requires 3.8+)
+python3 --version
+```
+
+### Permission Issues
+If you get permission errors:
+
+```bash
+# For global installation, try user installation
+python3 -m pip install --user pyyaml
+
+# Or use virtual environment (recommended)
+./install-deps.sh
+```
+
+### Missing Dependencies
+If jq or yq are missing:
+
+```bash
+# macOS
+brew install jq yq
+
+# Ubuntu/Debian
+sudo apt-get install jq
+
+# For yq on Ubuntu/Debian
+sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+sudo chmod +x /usr/local/bin/yq
+```
+
+### WordPress Connection Issues
+If the script can't connect to WordPress:
+
+- Ensure `wp-cli` is installed and working: `wp --info`
+- Check that the `wp_path` in `config.yml` is correct
+- Verify the `media_category` taxonomy exists in your WordPress installation
 
 ---
 
