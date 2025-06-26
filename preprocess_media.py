@@ -87,7 +87,7 @@ def fetch_attachments(config, limit=None, verbose=False):
     ]
     
     if limit:
-        cmd.extend(["--posts_per_page", str(limit)])
+        cmd.append(f"--posts_per_page={limit}")
     
     if verbose:
         print(f"Executing: {' '.join(cmd)}")

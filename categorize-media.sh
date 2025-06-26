@@ -390,6 +390,9 @@ load_matches_from_json() {
     local match_count=$(jq 'length' "$matches_file" 2>/dev/null || echo "0")
     if [[ "$match_count" == "0" ]]; then
         log_info "No matches found in preprocessor results"
+        # Create empty temp files for compatibility with display functions
+        TEMP_MATCHES_FILE=$(mktemp)
+        TEMP_TERMS_FILE=$(mktemp)
         return 0
     fi
     
