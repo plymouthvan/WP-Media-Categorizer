@@ -736,7 +736,7 @@ generate_csv_log() {
         # Process each attachment with matches
         local current_id=""
         local matches=""
-        local terms=""
+        local planned_terms=""
         
         while IFS=',' read -r attachment_id keyword; do
             if [[ "$attachment_id" != "$current_id" ]]; then
@@ -745,26 +745,61 @@ generate_csv_log() {
                     local filename=$(get_media_filename "$current_id")
                     local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
                     
+                    # Get actual results for apply mode, planned results for export mode
+                    local terms_assigned=""
+                    local terms_created=""
+                    
+                    if [[ "$mode" == "apply" ]]; then
+                        # Use actual results from apply mode - get from file
+                        terms_assigned=""
+                        if [[ -f "$TERMS_ASSIGNED_FILE" ]]; then
+                            while IFS=':' read -r file_id assigned_terms; do
+                                if [[ "$file_id" == "$current_id" ]]; then
+                                    terms_assigned="$assigned_terms"
+                                    break
+                                fi
+                            done < "$TERMS_ASSIGNED_FILE"
+                        fi
+                        
+                        # Build list of created terms
+                        local created_list=""
+                        if [[ -f "$TERMS_CREATED_FILE" ]]; then
+                            while IFS=':' read -r term_name term_id; do
+                                if [[ -n "$created_list" ]]; then
+                                    created_list="$created_list,$term_name"
+                                else
+                                    created_list="$term_name"
+                                fi
+                            done < "$TERMS_CREATED_FILE"
+                        fi
+                        terms_created="$created_list"
+                    else
+                        # Export mode - use planned terms
+                        terms_assigned="$planned_terms"
+                        terms_created=""
+                    fi
+                    
                     # Escape quotes in CSV fields
                     filename=${filename//\"/\"\"}
                     matches=${matches//\"/\"\"}
-                    terms=${terms//\"/\"\"}
+                    terms_assigned=${terms_assigned//\"/\"\"}
+                    terms_created=${terms_created//\"/\"\"}
                     
-                    echo "$current_id,\"$filename\",\"$matches\",\"$terms\",\"\",$timestamp" >> "$csv_path"
+                    echo "$current_id,\"$filename\",\"$matches\",\"$terms_assigned\",\"$terms_created\",$timestamp" >> "$csv_path"
                 fi
                 
                 # Start new entry
                 current_id="$attachment_id"
                 matches="$keyword"
                 
-                # Get terms for this attachment
-                terms=""
+                # Get planned terms for this attachment
+                planned_terms=""
                 while IFS=',' read -r term_attachment_id term_path; do
                     if [[ "$term_attachment_id" == "$attachment_id" ]]; then
-                        if [[ -n "$terms" ]]; then
-                            terms="$terms,$term_path"
+                        if [[ -n "$planned_terms" ]]; then
+                            planned_terms="$planned_terms,$term_path"
                         else
-                            terms="$term_path"
+                            planned_terms="$term_path"
                         fi
                     fi
                 done < "$TEMP_TERMS_FILE"
@@ -778,16 +813,313 @@ generate_csv_log() {
             local filename=$(get_media_filename "$current_id")
             local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
             
+            # Get actual results for apply mode, planned results for export mode
+            local terms_assigned=""
+            local terms_created=""
+            
+            if [[ "$mode" == "apply" ]]; then
+                # Use actual results from apply mode - get from file
+                terms_assigned=""
+                if [[ -f "$TERMS_ASSIGNED_FILE" ]]; then
+                    while IFS=':' read -r file_id assigned_terms; do
+                        if [[ "$file_id" == "$current_id" ]]; then
+                            terms_assigned="$assigned_terms"
+                            break
+                        fi
+                    done < "$TERMS_ASSIGNED_FILE"
+                fi
+                
+                # Build list of created terms
+                local created_list=""
+                if [[ -f "$TERMS_CREATED_FILE" ]]; then
+                    while IFS=':' read -r term_name term_id; do
+                        if [[ -n "$created_list" ]]; then
+                            created_list="$created_list,$term_name"
+                        else
+                            created_list="$term_name"
+                        fi
+                    done < "$TERMS_CREATED_FILE"
+                fi
+                terms_created="$created_list"
+            else
+                # Export mode - use planned terms
+                terms_assigned="$planned_terms"
+                terms_created=""
+            fi
+            
             # Escape quotes in CSV fields
             filename=${filename//\"/\"\"}
             matches=${matches//\"/\"\"}
-            terms=${terms//\"/\"\"}
+            terms_assigned=${terms_assigned//\"/\"\"}
+            terms_created=${terms_created//\"/\"\"}
             
-            echo "$current_id,\"$filename\",\"$matches\",\"$terms\",\"\",$timestamp" >> "$csv_path"
+            echo "$current_id,\"$filename\",\"$matches\",\"$terms_assigned\",\"$terms_created\",$timestamp" >> "$csv_path"
         fi
     fi
     
     log_success "Results logged to: $csv_path"
+}
+
+#==============================================================================
+# APPLY MODE FUNCTIONS
+#==============================================================================
+
+# Global variables for tracking actual results (Bash 3.2 compatible)
+TERMS_CREATED_FILE=$(mktemp)      # term_name:term_id pairs
+TERMS_ASSIGNED_FILE=$(mktemp)     # attachment_id:term1,term2,term3 pairs
+ASSIGNMENT_ERRORS_FILE=$(mktemp)  # attachment_id:error_message pairs
+
+create_backup() {
+    log_info "Creating database backup..."
+    
+    # Expand backup path with date substitution
+    local backup_path=$(eval echo "$CONFIG_BACKUP_PATH")
+    local backup_dir=$(dirname "$backup_path")
+    
+    # Ensure backup directory exists
+    if [[ ! -d "$backup_dir" ]]; then
+        log_verbose "Creating backup directory: $backup_dir"
+        mkdir -p "$backup_dir" || {
+            log_error "Failed to create backup directory: $backup_dir"
+            return 1
+        }
+    fi
+    
+    log_verbose "Backup path: $backup_path"
+    
+    # Create database backup using wp-cli
+    if ! (cd "$CONFIG_WP_PATH" && wp db export "$backup_path" 2>/dev/null); then
+        log_error "Failed to create database backup"
+        return 1
+    fi
+    
+    log_success "Database backup created: $backup_path"
+}
+
+analyze_required_terms() {
+    log_info "Analyzing required taxonomy terms..."
+    
+    # Extract all unique term paths from TEMP_TERMS_FILE
+    local -a all_terms=()
+    local -a missing_terms=()
+    
+    # Get unique terms (Bash 3.2 compatible)
+    while IFS=',' read -r attachment_id term_path; do
+        # Check if we've already seen this term
+        local found=false
+        for existing_term in "${all_terms[@]}"; do
+            if [[ "$existing_term" == "$term_path" ]]; then
+                found=true
+                break
+            fi
+        done
+        
+        if [[ "$found" == "false" ]]; then
+            all_terms+=("$term_path")
+        fi
+    done < "$TEMP_TERMS_FILE"
+    
+    log_verbose "Found ${#all_terms[@]} unique term paths"
+    
+    # Check which terms don't exist
+    for term_path in "${all_terms[@]}"; do
+        # Parse hierarchical term to check each level
+        IFS=' > ' read -ra TERM_PARTS <<< "$term_path"
+        
+        for term_name in "${TERM_PARTS[@]}"; do
+            if ! term_exists "$term_name"; then
+                # Check if we've already marked this term as missing
+                local already_missing=false
+                for missing_term in "${missing_terms[@]}"; do
+                    if [[ "$missing_term" == "$term_name" ]]; then
+                        already_missing=true
+                        break
+                    fi
+                done
+                
+                if [[ "$already_missing" == "false" ]]; then
+                    missing_terms+=("$term_name")
+                fi
+            fi
+        done
+    done
+    
+    if [[ ${#missing_terms[@]} -eq 0 ]]; then
+        log_success "All required terms already exist"
+        return 0
+    fi
+    
+    log_info "Missing terms that need to be created:"
+    for term in "${missing_terms[@]}"; do
+        echo "  - $term"
+    done
+    
+    # Prompt user unless --no-prompt is set
+    if [[ "$ARG_NO_PROMPT" != "true" ]]; then
+        echo
+        read -p "Create missing terms? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "User declined to create missing terms. Exiting."
+            return 1
+        fi
+    fi
+    
+    # Create missing terms
+    log_info "Creating missing taxonomy terms..."
+    for term_path in "${all_terms[@]}"; do
+        if create_taxonomy_term "$term_path"; then
+            # Track created terms for CSV logging
+            IFS=' > ' read -ra TERM_PARTS <<< "$term_path"
+            for term_name in "${TERM_PARTS[@]}"; do
+                # Check if term already recorded
+                if ! grep -q "^$term_name:" "$TERMS_CREATED_FILE" 2>/dev/null; then
+                    local term_id=$(find_term_id "$term_name")
+                    echo "$term_name:$term_id" >> "$TERMS_CREATED_FILE"
+                fi
+            done
+        fi
+    done
+    
+    log_success "Term analysis and creation completed"
+}
+
+filter_terms_by_mode() {
+    local attachment_id="$1"
+    local -a all_terms=()
+    local -a filtered_terms=()
+    
+    # Load all terms for this attachment
+    while IFS=',' read -r term_attachment_id term_path; do
+        if [[ "$term_attachment_id" == "$attachment_id" ]]; then
+            all_terms+=("$term_path")
+        fi
+    done < "$TEMP_TERMS_FILE"
+    
+    case "$CONFIG_TAXONOMY_MODE" in
+        "all")
+            # Return all terms - simple case
+            filtered_terms=("${all_terms[@]}")
+            ;;
+        "children_only")
+            # Return only terms that have children (not leaf terms)
+            for term_path in "${all_terms[@]}"; do
+                # Check if this term path has a child in the list
+                local has_child=false
+                for other_term in "${all_terms[@]}"; do
+                    if [[ "$other_term" != "$term_path" && "$other_term" == "$term_path > "* ]]; then
+                        has_child=true
+                        break
+                    fi
+                done
+                
+                if [[ "$has_child" == "true" ]]; then
+                    filtered_terms+=("$term_path")
+                fi
+            done
+            ;;
+        "bottom_only")
+            # Return only leaf terms (deepest in hierarchy)
+            for term_path in "${all_terms[@]}"; do
+                # Check if this term is a leaf (no other term starts with this + " > ")
+                local is_leaf=true
+                for other_term in "${all_terms[@]}"; do
+                    if [[ "$other_term" != "$term_path" && "$other_term" == "$term_path > "* ]]; then
+                        is_leaf=false
+                        break
+                    fi
+                done
+                
+                if [[ "$is_leaf" == "true" ]]; then
+                    filtered_terms+=("$term_path")
+                fi
+            done
+            ;;
+    esac
+    
+    # Output filtered terms (one per line for caller)
+    printf '%s\n' "${filtered_terms[@]}"
+}
+
+assign_term_to_attachment() {
+    local attachment_id="$1"
+    local term_path="$2"
+    
+    # Get the bottom-most term name from the path
+    local term_name="${term_path##* > }"
+    
+    # Find the term ID
+    local term_id
+    if ! term_id=$(find_term_id "$term_name"); then
+        log_error "Term not found: $term_name"
+        return 1
+    fi
+    
+    log_verbose "Assigning term '$term_name' (ID: $term_id) to attachment $attachment_id"
+    
+    # Use wp-cli to assign the term
+    if (cd "$CONFIG_WP_PATH" && wp post term add "$attachment_id" "$TAXONOMY_NAME" "$term_id" 2>/dev/null); then
+        log_verbose "Successfully assigned term '$term_name' to attachment $attachment_id"
+        return 0
+    else
+        log_error "Failed to assign term '$term_name' to attachment $attachment_id"
+        return 1
+    fi
+}
+
+apply_taxonomy_assignments() {
+    log_info "Applying taxonomy assignments..."
+    
+    local total_assignments=0
+    local successful_assignments=0
+    
+    for attachment_id in "${MEDIA_IDS[@]}"; do
+        local -a terms_to_assign=()
+        
+        # Get filtered terms for this attachment
+        while IFS= read -r term; do
+            if [[ -n "$term" ]]; then
+                terms_to_assign+=("$term")
+            fi
+        done < <(filter_terms_by_mode "$attachment_id")
+        
+        if [[ ${#terms_to_assign[@]} -eq 0 ]]; then
+            log_verbose "No terms to assign for attachment $attachment_id"
+            continue
+        fi
+        
+        local filename=$(get_media_filename "$attachment_id")
+        log_verbose "Processing attachment: $filename (ID: $attachment_id)"
+        
+        # Apply each term and track results
+        local assigned_terms=()
+        for term_path in "${terms_to_assign[@]}"; do
+            ((total_assignments++))
+            if assign_term_to_attachment "$attachment_id" "$term_path"; then
+                assigned_terms+=("$term_path")
+                ((successful_assignments++))
+            else
+                echo "$attachment_id:Failed to assign: $term_path" >> "$ASSIGNMENT_ERRORS_FILE"
+            fi
+        done
+        
+        # Store actual results for CSV logging
+        if [[ ${#assigned_terms[@]} -gt 0 ]]; then
+            local assigned_list
+            assigned_list=$(IFS=','; echo "${assigned_terms[*]}")
+            echo "$attachment_id:$assigned_list" >> "$TERMS_ASSIGNED_FILE"
+        fi
+    done
+    
+    log_success "Applied $successful_assignments of $total_assignments taxonomy assignments"
+    
+    # Report any errors
+    if [[ -s "$ASSIGNMENT_ERRORS_FILE" ]]; then
+        log_warning "Some assignments failed:"
+        while IFS=':' read -r attachment_id error_msg; do
+            log_warning "  Attachment $attachment_id: $error_msg"
+        done < "$ASSIGNMENT_ERRORS_FILE"
+    fi
 }
 
 #==============================================================================
@@ -807,8 +1139,28 @@ export_mode() {
 
 apply_mode() {
     log_info "Running in apply mode..."
-    log_warning "Apply mode not fully implemented in this simplified version"
-    log_info "This would create backups, terms, and apply taxonomy assignments"
+    
+    # Validate that we have matches to process
+    if [[ ! -f "$TEMP_MATCHES_FILE" || ! -s "$TEMP_MATCHES_FILE" ]]; then
+        log_info "No attachments matched any keywords - nothing to apply"
+        return 0
+    fi
+    
+    # Create backup if enabled
+    if [[ "$CONFIG_BACKUP_ENABLED" == "true" ]]; then
+        create_backup || return 1
+    fi
+    
+    # Analyze and create missing terms
+    analyze_required_terms || return 1
+    
+    # Apply taxonomy assignments
+    apply_taxonomy_assignments || return 1
+    
+    # Generate CSV log with actual results
+    generate_csv_log "apply"
+    
+    log_success "Apply mode completed successfully"
 }
 
 #==============================================================================
