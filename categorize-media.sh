@@ -236,7 +236,9 @@ validate_wordpress() {
     fi
     
     # Check if taxonomy exists
-    if ! (cd "$CONFIG_WP_PATH" && wp taxonomy list --field=name | grep -q "^${TAXONOMY_NAME}$"); then
+    log_verbose "Checking for taxonomy: $TAXONOMY_NAME"
+    local taxonomy_check
+    if ! taxonomy_check=$(cd "$CONFIG_WP_PATH" && wp taxonomy get "$TAXONOMY_NAME" --field=name 2>/dev/null); then
         log_error "Taxonomy '${TAXONOMY_NAME}' not found in WordPress"
         log_error "Please register the taxonomy before running this script"
         return 1
@@ -330,6 +332,10 @@ ensure_csv_directory() {
 get_media_attachments() {
     log_info "Fetching media attachments..."
     
+    # Create temp files early for match storage
+    TEMP_MATCHES_FILE=$(mktemp)
+    TEMP_TERMS_FILE=$(mktemp)
+    
     local wp_args="post list --post_type=attachment --format=csv --fields=ID,post_title,guid"
     if [[ $ARG_LIMIT -gt 0 ]]; then
         wp_args="$wp_args --posts_per_page=$ARG_LIMIT"
@@ -341,7 +347,9 @@ get_media_attachments() {
         return 1
     fi
     
-    local count=0
+    local total_count=0
+    local matched_count=0
+    
     while IFS=',' read -r id title guid; do
         # Skip header row
         if [[ "$id" == "ID" ]]; then
@@ -356,12 +364,21 @@ get_media_attachments() {
         title=${title//\"/}
         filename=${filename//\"/}
         
-        add_media_data "$id" "$filename" "$title"
-        ((count++))
+        ((total_count++))
+        
+        # NEW: Filter during processing - only store matching attachments
+        if has_keyword_matches "$filename"; then
+            add_media_data "$id" "$filename" "$title"
+            store_matches_for_attachment "$id" "$filename"
+            ((matched_count++))
+        else
+            # Verbose logging for non-matches
+            log_verbose "Processing: $filename (ID: $id) - no matches"
+        fi
     done <<< "$attachment_data"
     
-    log_success "Found $count attachments"
-    if [[ $count -gt 0 ]]; then
+    log_success "Found $total_count attachments, $matched_count with matches"
+    if [[ $matched_count -gt 0 ]]; then
         log_verbose "Sample: ${MEDIA_FILENAMES[0]}"
     fi
 }
@@ -460,51 +477,55 @@ match_filename() {
     return 1
 }
 
+# Check if a filename has any keyword matches (for early filtering)
+has_keyword_matches() {
+    local filename="$1"
+    
+    while IFS= read -r mapping_key; do
+        local match_pattern=$(yq eval ".mappings.$mapping_key.match" "$CONFIG_FILE")
+        local is_regex=$(yq eval ".mappings.$mapping_key.regex // false" "$CONFIG_FILE")
+        
+        if match_filename "$filename" "$match_pattern" "$is_regex"; then
+            return 0  # Found a match
+        fi
+    done <<< "$(yq eval '.mappings | keys | .[]' "$CONFIG_FILE")"
+    
+    return 1  # No matches found
+}
+
+# Store matches for an attachment (replicates process_keyword_matches behavior)
+store_matches_for_attachment() {
+    local attachment_id="$1" filename="$2"
+    local has_matches=false
+    
+    log_verbose "Processing: $filename (ID: $attachment_id)"
+    
+    while IFS= read -r mapping_key; do
+        local match_pattern=$(yq eval ".mappings.$mapping_key.match" "$CONFIG_FILE")
+        local is_regex=$(yq eval ".mappings.$mapping_key.regex // false" "$CONFIG_FILE")
+        
+        if match_filename "$filename" "$match_pattern" "$is_regex"; then
+            log_verbose "  ✓ Matched keyword: \"$match_pattern\""
+            echo "$attachment_id,$mapping_key" >> "$TEMP_MATCHES_FILE"
+            has_matches=true
+            
+            while IFS= read -r term_path; do
+                echo "$attachment_id,$term_path" >> "$TEMP_TERMS_FILE"
+                log_verbose "    → $term_path"
+            done <<< "$(yq eval ".mappings.$mapping_key.terms[]" "$CONFIG_FILE")"
+        fi
+    done <<< "$(yq eval '.mappings | keys | .[]' "$CONFIG_FILE")"
+    
+    return 0
+}
+
 process_keyword_matches() {
     log_info "Processing keyword matches..."
     
-    local processed_count=0
-    local matched_count=0
-    local temp_matches_file=$(mktemp)
-    local temp_terms_file=$(mktemp)
-    
-    # Process each attachment
-    local i
-    for i in "${!MEDIA_IDS[@]}"; do
-        local attachment_id="${MEDIA_IDS[$i]}"
-        local filename="${MEDIA_FILENAMES[$i]}"
-        log_verbose "Processing: $filename (ID: $attachment_id)"
-        
-        local has_matches=false
-        
-        # Process each mapping from config
-        while IFS= read -r mapping_key; do
-            local match_pattern=$(yq eval ".mappings.$mapping_key.match" "$CONFIG_FILE")
-            local is_regex=$(yq eval ".mappings.$mapping_key.regex // false" "$CONFIG_FILE")
-            
-            if match_filename "$filename" "$match_pattern" "$is_regex"; then
-                log_verbose "  ✓ Matched keyword: \"$match_pattern\""
-                echo "$attachment_id,$mapping_key" >> "$temp_matches_file"
-                has_matches=true
-                
-                # Add all terms for this mapping
-                while IFS= read -r term_path; do
-                    echo "$attachment_id,$term_path" >> "$temp_terms_file"
-                    log_verbose "    → $term_path"
-                done <<< "$(yq eval ".mappings.$mapping_key.terms[]" "$CONFIG_FILE")"
-            fi
-        done <<< "$(yq eval '.mappings | keys | .[]' "$CONFIG_FILE")"
-        
-        if [[ "$has_matches" == "true" ]]; then
-            ((matched_count++))
-        fi
-        
-        ((processed_count++))
-    done
-    
-    # Store temp files for later use
-    TEMP_MATCHES_FILE="$temp_matches_file"
-    TEMP_TERMS_FILE="$temp_terms_file"
+    # All the work is now done during get_media_attachments()
+    # This function just reports the pre-computed results
+    local processed_count=${#MEDIA_IDS[@]}
+    local matched_count=$processed_count  # All stored items are matches now
     
     log_success "Processed $processed_count attachments, $matched_count with matches"
 }
