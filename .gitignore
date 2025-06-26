@@ -2,9 +2,9 @@
 backups/
 *.sql
 
-# Config files (keep sample, ignore actual config)
-config.local.yml
+# Config files - use sample.config.yml as template
 config.yml
+config.local.yml
 
 # System files
 .DS_Store
