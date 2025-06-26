@@ -18,16 +18,19 @@ This tool is designed for use in local or staging environments where automated t
 
 ## 📁 Project Structure
 
+```
 media-categorizer/
 ├── categorize-media.sh      # Main script
 ├── config.yml               # Keyword mapping & settings
 └── README.md                # This file
+```
 
 ---
 
 ## 🧠 How it Works
 
 The script:
+
 1. Parses `config.yml` to read:
    - Your WordPress install location
    - Keyword-to-taxonomy mappings (e.g., filenames containing "Formals" → "Wedding > Portraits")
@@ -76,47 +79,71 @@ mappings:
       - Wedding > Details
 ```
 
-⸻
+---
 
-🚀 Usage
+## 🚀 Usage
 
-Dry run (default):
+### Dry run (default):
 
-    ./categorize-media.sh
+```bash
+./categorize-media.sh
+```
 
-Apply changes:
+### Apply changes:
 
-    ./categorize-media.sh --apply
+```bash
+./categorize-media.sh --apply
+```
 
-Optional Flags:
+### Optional Flags:
 
-    --apply           Actually assign taxonomy terms and create missing terms if confirmed
-    --no-prompt       Suppress interactive prompts (auto-create missing terms if needed)
-    --limit=N         Process only the first N matching attachments (useful for testing)
-    --export          Skip all changes and output results as CSV only (dry-run + log)
-    --verbose         Display detailed processing output for debugging and review
+- `--apply` - Actually assign taxonomy terms and create missing terms if confirmed
+- `--no-prompt` - Suppress interactive prompts (auto-create missing terms if needed)
+- `--limit=N` - Process only the first N matching attachments (useful for testing)
+- `--export` - Skip all changes and output results as CSV only (dry-run + log)
+- `--verbose` - Display detailed processing output for debugging and review
+- `--no-color` - Disable colored terminal output
+- `-h, --help` - Show usage information
 
+### Examples:
 
-⸻
+```bash
+# Dry run with verbose output
+./categorize-media.sh --verbose
 
-🧪 Notes
-	•	Filenames are matched case-insensitively against keywords.
-	•	The script only scans media items (post_type=attachment).
-	•	Files can match multiple keywords, and all applicable taxonomy terms will be assigned.
-	•	Terms are created if missing, unless declined during prompt.
-	•	Hierarchical terms are respected and created in order if necessary.
-	•	Term existence checks are cached for performance — the script avoids duplicate `wp term list` calls.
-	•	When `--apply` is used, the script generates a simple CSV log of changes (attachments updated and terms created).
-	•	If multiple keywords match the same taxonomy term, that term is only assigned once per attachment.
-	•	Terminal color output is enabled by default for readability. Use `--no-color` to disable it.
-	•	A future `--export` flag may be added to generate CSV output only, without making changes or prompting.
-• Regex-based matching is supported. Use `regex: true` under a mapping entry to match filenames with regular expressions.
-• The `--export` flag behaves like a dry run, but outputs results to CSV without applying any changes or prompting.
-• Use `--verbose` to print extra details during processing, including matched keywords, term assignments, and creation events.
-• You can customize the location of the CSV output log with `settings.output_csv_path` in your config file.
+# Apply changes with prompts
+./categorize-media.sh --apply
 
-⸻
+# Apply changes without prompts
+./categorize-media.sh --apply --no-prompt
 
-💥 Disclaimer
+# Generate CSV report only
+./categorize-media.sh --export
+
+# Process first 10 attachments with details
+./categorize-media.sh --limit=10 --verbose
+```
+
+---
+
+## 🧪 Notes
+
+- Filenames are matched case-insensitively against keywords
+- The script only scans media items (post_type=attachment)
+- Files can match multiple keywords, and all applicable taxonomy terms will be assigned
+- Terms are created if missing, unless declined during prompt
+- Hierarchical terms are respected and created in order if necessary
+- Term existence checks are cached for performance — the script avoids duplicate `wp term list` calls
+- When `--apply` is used, the script generates a simple CSV log of changes (attachments updated and terms created)
+- If multiple keywords match the same taxonomy term, that term is only assigned once per attachment
+- Terminal color output is enabled by default for readability. Use `--no-color` to disable it
+- Regex-based matching is supported. Use `regex: true` under a mapping entry to match filenames with regular expressions
+- The `--export` flag behaves like a dry run, but outputs results to CSV without applying any changes or prompting
+- Use `--verbose` to print extra details during processing, including matched keywords, term assignments, and creation events
+- You can customize the location of the CSV output log with `settings.output_csv_path` in your config file
+
+---
+
+## 💥 Disclaimer
 
 This script is provided for use in development and staging environments. Do not run this in production without understanding the consequences. Back up your database before making changes.
