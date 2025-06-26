@@ -104,8 +104,14 @@ class MediaCategorizer:
             'autocommit': False
         }
         
-        # Add port if specified
-        if settings.get('db_port'):
+        # Add port if specified, or use socket if specified
+        if settings.get('db_socket'):
+            # Use Unix socket connection (common with MAMP)
+            connection_params['unix_socket'] = settings['db_socket']
+            # Remove host when using socket
+            del connection_params['host']
+            connection_string = f"{settings['db_name']}@socket:{settings['db_socket']}"
+        elif settings.get('db_port'):
             connection_params['port'] = int(settings['db_port'])
             connection_string = f"{settings['db_name']}@{settings['db_host']}:{settings['db_port']}"
         else:
