@@ -1,0 +1,17 @@
+# Backup files
+backups/
+*.sql
+
+# Config overrides (optional)
+config.local.yml
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Shell script artifacts
+*.swp
+*.swo

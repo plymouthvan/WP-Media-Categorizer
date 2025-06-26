@@ -1,0 +1,24 @@
+
+
+
+settings:
+  wp_path: /path/to/your/local/wordpress
+  apply_taxonomy:
+    mode: all  # Options: all, children_only, bottom_only
+  backup:
+    enabled: true
+    output_path: ./backups/media-categorizer-$(date +%F_%H-%M-%S).sql
+
+mappings:
+  Formals:
+    - Wedding > Portraits
+  Candids:
+    - Wedding > Preparations
+  Ceremony:
+    - Wedding > Ceremony
+  Details:
+    - Wedding > Details
+  Party:
+    - Wedding > Party
+  Portfolio:
+    - Portfolio
