@@ -12,6 +12,7 @@ This tool is designed for use in local or staging environments where automated t
 - `yq` must be installed (for parsing YAML)
 - The WordPress installation must be accessible and functioning
 - A custom taxonomy named `media_category` must already be registered
+- Bash 3.2+ is required. On macOS, the default bash version is sufficient.
 
 ---
 
@@ -43,6 +44,8 @@ The script:
 
 ## 📝 config.yml Format
 
+The top-level keys under `mappings` are only labels for organizational purposes. They do not affect the logic. You can name them anything you like — they are not used for matching.
+
 ```yaml
 settings:
   wp_path: /path/to/wordpress
@@ -51,21 +54,27 @@ settings:
   backup:
     enabled: true
     output_path: ./backups/media-categorizer-$(date +%F_%H-%M-%S).sql
+  output_csv_path: ./logs/media-categorizer-log-$(date +%F_%H-%M-%S).csv
 
 mappings:
   Formals:
-    - Wedding > Portraits
+    match: "Formals"
+    terms:
+      - Wedding > Portraits
   Candids:
-    - Wedding > Preparations
+    match: "Candids"
+    terms:
+      - Wedding > Preparations
   Ceremony:
-    - Wedding > Ceremony
-  Details:
-    - Wedding > Details
-  Party:
-    - Wedding > Party
-  Portfolio:
-    - Portfolio
-
+    match: "Ceremony"
+    terms:
+      - Wedding > Ceremony
+  PatternExample:
+    match: "(?i)^wedding.*details"
+    regex: true
+    terms:
+      - Wedding > Details
+```
 
 ⸻
 
@@ -73,11 +82,19 @@ mappings:
 
 Dry run (default):
 
-./categorize-media.sh
+    ./categorize-media.sh
 
 Apply changes:
 
-./categorize-media.sh --apply
+    ./categorize-media.sh --apply
+
+Optional Flags:
+
+    --apply           Actually assign taxonomy terms and create missing terms if confirmed
+    --no-prompt       Suppress interactive prompts (auto-create missing terms if needed)
+    --limit=N         Process only the first N matching attachments (useful for testing)
+    --export          Skip all changes and output results as CSV only (dry-run + log)
+    --verbose         Display detailed processing output for debugging and review
 
 
 ⸻
@@ -88,6 +105,15 @@ Apply changes:
 	•	Files can match multiple keywords, and all applicable taxonomy terms will be assigned.
 	•	Terms are created if missing, unless declined during prompt.
 	•	Hierarchical terms are respected and created in order if necessary.
+	•	Term existence checks are cached for performance — the script avoids duplicate `wp term list` calls.
+	•	When `--apply` is used, the script generates a simple CSV log of changes (attachments updated and terms created).
+	•	If multiple keywords match the same taxonomy term, that term is only assigned once per attachment.
+	•	Terminal color output is enabled by default for readability. Use `--no-color` to disable it.
+	•	A future `--export` flag may be added to generate CSV output only, without making changes or prompting.
+• Regex-based matching is supported. Use `regex: true` under a mapping entry to match filenames with regular expressions.
+• The `--export` flag behaves like a dry run, but outputs results to CSV without applying any changes or prompting.
+• Use `--verbose` to print extra details during processing, including matched keywords, term assignments, and creation events.
+• You can customize the location of the CSV output log with `settings.output_csv_path` in your config file.
 
 ⸻
 

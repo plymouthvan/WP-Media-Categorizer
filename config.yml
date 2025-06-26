@@ -1,6 +1,3 @@
-
-
-
 settings:
   wp_path: /path/to/your/local/wordpress
   apply_taxonomy:
